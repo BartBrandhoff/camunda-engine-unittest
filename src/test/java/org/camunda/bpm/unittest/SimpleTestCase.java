@@ -14,45 +14,69 @@ package org.camunda.bpm.unittest;
 
 import org.camunda.bpm.engine.RuntimeService;
 import org.camunda.bpm.engine.TaskService;
+import org.camunda.bpm.engine.runtime.Execution;
 import org.camunda.bpm.engine.runtime.ProcessInstance;
 import org.camunda.bpm.engine.task.Task;
 import org.camunda.bpm.engine.test.Deployment;
 import org.camunda.bpm.engine.test.ProcessEngineRule;
-
-import static org.junit.Assert.*;
-
 import org.junit.Rule;
 import org.junit.Test;
 
+import java.util.List;
+
+import static org.junit.Assert.*;
+
 /**
  * @author Daniel Meyer
- *
  */
 public class SimpleTestCase {
 
-  @Rule
-  public ProcessEngineRule rule = new ProcessEngineRule();
+    @Rule
+    public ProcessEngineRule rule = new ProcessEngineRule();
 
-  @Test
-  @Deployment(resources = {"testProcess.bpmn"})
-  public void shouldExecuteProcess() {
+    @Test
+    @Deployment(resources = {"testProcess.bpmn"})
+    public void shouldExecuteProcess() {
 
-    RuntimeService runtimeService = rule.getRuntimeService();
-    TaskService taskService = rule.getTaskService();
+        RuntimeService runtimeService = rule.getRuntimeService();
+        TaskService taskService = rule.getTaskService();
 
-    ProcessInstance pi = runtimeService.startProcessInstanceByKey("testProcess");
-    assertFalse("Process instance should not be ended", pi.isEnded());
-    assertEquals(1, runtimeService.createProcessInstanceQuery().count());
+        ProcessInstance pi = runtimeService.startProcessInstanceByKey("testProcess");
+        assertFalse("Process instance should not be ended", pi.isEnded());
+        assertEquals(1, runtimeService.createProcessInstanceQuery().count());
 
-    Task task = taskService.createTaskQuery().singleResult();
-    assertNotNull("Task should exist", task);
+        Task UserTask1 = taskService.createTaskQuery()
+                .taskDefinitionKey("UserTask_1")
+                .singleResult();
+        assertNotNull("User Task 1 should exist", UserTask1);
 
-    // complete the task
-    taskService.complete(task.getId());
+        Execution subProcess = runtimeService.createExecutionQuery()
+                .processInstanceId(pi.getId())
+                .messageEventSubscriptionName("StartEventSubProcess")
+                .singleResult();
+        assertNotNull("subProcess should exist", subProcess);
 
-    // now the process instance should be ended
-    assertEquals(0, runtimeService.createProcessInstanceQuery().count());
+        // start event sub process 3 times
+        for (int i = 1; i <= 3; i++)
+            runtimeService.messageEventReceived("StartEventSubProcess", subProcess.getId());
 
-  }
+        //check that user task 2 is created 3 times
+        List<Task> tasksInEventSubProcess = taskService.createTaskQuery()
+                .taskDefinitionKey("UserTask_2")
+                .list();
+        assertEquals(3, tasksInEventSubProcess.size());
+
+        // complete User Task 1
+        taskService.complete(UserTask1.getId());
+
+        // after completing user task 1, all instances of user task 2 should be ended
+        assertEquals(0, taskService.createTaskQuery()
+                .taskDefinitionKey("UserTask_2")
+                .list().size());
+
+        // now the process instance should be ended
+        assertEquals(0, runtimeService.createProcessInstanceQuery().count());
+
+    }
 
 }
